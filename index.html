@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>json-excel</title>
+    <script src="./xlsx.full.min.js" defer></script>
+  </head>
+  <body>
+    <input type="text" id="jsonInput" />
+    <button type="button" id="btn">convert</button>
+    <script>
+      // 只支持一个子列表,且不能子列表不能嵌套,且子列表必须要有至少两个property
+      document.getElementById("btn").addEventListener("click", (e) => {
+        // 获取json并parse
+        const jsonData = JSON.parse(document.getElementById("jsonInput").value);
+        console.log(jsonData);
+        // 记录合并单元格
+        let merge = [];
+        // 是否有子列表
+        let hasArray = false;
+        // 用Array Of Array 转换
+        let aoa = [];
+        // 以第一条数据做范例
+        let obj = jsonData[0];
+        // 记录要推多少空格
+        let count = 0;
+        // 记录属性 
+        let props = {
+          // 记录是否要推""
+          __format__: [],
+        };
+        // 第一行和第二行是表头
+        let firstCol = [];
+        let secondCol = [];
+        // 遍历第一项的每一个属性
+        Object.entries(obj).forEach(([key, value], index) => {
+          firstCol.push(key);
+          // 如果这个属性的值是array
+          if (Array.isArray(value)) {
+            hasArray = true;
+            // 记录index
+            props[key] = { index, isArray: true, sub_array: [] };
+            props.__format__.push(true);
+            // 在merge里面推一个项
+            merge.push({
+              s: { r: 0, c: index },
+              e: { r: 0, c: Object.entries(value[0]).length },
+            });
+            // 记录了多少个count就表示前面有多少属性没有array
+            for (let i = count; i > 0; i--) {
+              firstCol.push("");
+              secondCol.push("");
+            }
+            // 在第二行开始推列表里面的属性
+            Object.entries(value[0]).forEach(([k, v], j) => {
+              secondCol.push(k);
+              props[key].sub_array.push({ key: k, index: j + index });
+            });
+          } else {
+            count++;
+            props[key] = { index, isArray: false };
+            props.__format__.push(false);
+          }
+        });
+        // 遍历props如果是有array 就让没有array的属性 合并自身和其下的单元格
+        for (const key in props) {
+          if (key == "__format__") continue;
+          let { index, isArray } = props[key];
+          if (hasArray) {
+            if (!isArray) {
+              merge.push({
+                s: { r: 0, c: index },
+                e: { r: 1, c: index },
+              });
+            }
+          }
+        }
+        // 将第一二行推入aoa
+        aoa.push(firstCol, secondCol);
+        //  转换数据
+        let dataArr = [];
+
+        jsonData.forEach((row, index) => {
+          // 如果会遇到有array的属性
+          if (hasArray) {
+            // 先设立一个空的填入值
+            let arr = [[]];
+            // 遍历props
+            for (const key in props) {
+              if (key == "__format__") continue;
+              const { index, isArray, sub_array } = props[key];
+              // 如果属性有array
+              if (isArray) {
+                // 遍历props将没有array的属性合并单元格
+                for (const k in props) {
+                  if (k == "__format__") continue;
+                  if (!props[k].isArray) {
+                    // 开始行是当前的数据长度加前面两行
+                    // 结束行是当前的数据加前面两行加子列表长度-1
+                    merge.push({
+                      s: { r: dataArr.length + 2, c: props[k].index },
+                      e: { r: dataArr.length + row[key].length + 1, c: props[k].index },
+                    });
+                  }
+                }
+                // 遍历子列表
+                row[key].forEach((item, j) => {
+                  // 如果是子列表第一个数据
+                  if (j == 0) {
+                    // 在a[[这里]]加相应的值
+                    sub_array.forEach((it) => {
+                      arr[0][it.index] = item[it.key];
+                    });
+                    // 如果是第二行开始就直接推新的array
+                  } else {
+                    let a = [];
+                    // 遍历props.__format__
+                    props.__format__.forEach((it) => {
+                      // 如果false表示是要合并的单元格,推一个""
+                      // 如果true就推相应的值
+                      if (it) {
+                        sub_array.forEach((i) => {
+                          a.push(item[i.key]);
+                        });
+                      } else {
+                        a.push("");
+                      }
+                    });
+                    arr.push(a);
+                  }
+                });
+              } else {
+                // 没有属性子列表就直接加值
+                arr[0][index] = row[key];
+              }
+            }
+
+            dataArr.push(...arr);
+            // 如果没有子列表
+          } else {
+            let arr = [];
+            for (const key in props) {
+              const { index, isArray } = props[key];
+              arr[index] = row[key];
+            }
+            dataArr.push(arr);
+          }
+        });
+        aoa.push(...dataArr);
+        let ws = XLSX.utils.aoa_to_sheet(aoa);
+        ws["!merges"] = merge;
+
+        let wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "");
+        var wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+        XLSX.writeFile(wb, "download.xlsx");
+      });
+    </script>
+  </body>
+</html>
